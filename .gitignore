@@ -1,5 +1,9 @@
 #laserweb
 
+# vim temporary
+*.swp
+*.swo
+
 # Compiled source #
 ###################
 *.com

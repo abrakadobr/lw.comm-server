@@ -48,6 +48,7 @@ const firmwareFeatures = require('./firmwareFeatures.js');
 var logFile;
 var connectionType, connections = [];
 var gcodeQueue = [];
+var gcodeQNs = [];
 var port, isConnected, connectedTo, portsList;
 var machineSocket, connectedIp;
 var telnetBuffer, espBuffer;
@@ -328,7 +329,8 @@ io.sockets.on('connection', function (appSocket) {
                                 clearInterval(queueCounter);
                                 clearInterval(statusLoop);
                                 gcodeQueue.length = 0; // dump the queye
-                                grblBufferSize.length = 0; // dump bufferSizes
+                                grblBufferSize = []; // dump bufferSizes
+                                gcodeQNs = [];
                                 tinygBufferSize = TINYG_RX_BUFFER_SIZE; // reset tinygBufferSize
                                 reprapBufferSize = REPRAP_RX_BUFFER_SIZE; // reset reprapBufferSize
                                 reprapWaitForPos = false;
@@ -372,7 +374,13 @@ io.sockets.on('connection', function (appSocket) {
                     writeLog('Recv: ' + data, 3);
                     if (data.indexOf('ok') === 0) { // Got an OK so we are clear to send
                         if (firmware === 'grbl') {
-                            grblBufferSize.shift();
+                            var cbel = grblBufferSize.shift();
+                            var cbn;
+                            if (typeof(cbel) == 'object')
+                              cbn = gcodeQNs[cbel.qp];
+
+                            if (typeof(cbn) != 'undefined' && cbn != -1)
+                              io.emit('data',{ data: data, qn: cbn, type: 'ok'});
                         }
                         if (firmware === 'repetier' || firmware === 'marlinkimbra') {
                             reprapBufferSize++;
@@ -776,10 +784,19 @@ io.sockets.on('connection', function (appSocket) {
                     } else if (data.indexOf('ALARM') === 0) { //} || data.indexOf('HALTED') === 0) {
                         switch (firmware) {
                         case 'grbl':
-                            grblBufferSize.shift();
+                            var cbel = grblBufferSize.shift();
+                            var cbn;
+                            if (typeof(cbel) == 'object')
+                              cbn = gcodeQNs[cbel.qp];
+
                             var alarmCode = parseInt(data.split(':')[1]);
-                            writeLog('ALARM: ' + alarmCode + ' - ' + grblStrings.alarms(alarmCode));
-                            io.sockets.emit('data', 'ALARM: ' + alarmCode + ' - ' + grblStrings.alarms(alarmCode));
+                            var msg = 'ALARM: ' + alarmCode + ' - ' + grblStrings.alarms(alarmCode);
+                            writeLog(msg);
+
+                            if (typeof(cbn) != 'undefined' && cbn != -1)
+                              io.emit('data',{ data: msg, qn: cbn, type: 'alarm', errCode: alarmCode, errMsg: grblStrings.alarms(alarmCode) });
+                            else
+                              io.sockets.emit('data', msg);
                             break;
                         case 'smoothie':
                             io.sockets.emit('data', data);
@@ -806,10 +823,23 @@ io.sockets.on('connection', function (appSocket) {
                     } else if (data.indexOf('error') === 0) { // Error received -> stay blocked stops queue
                         switch (firmware) {
                         case 'grbl':
-                            grblBufferSize.shift();
+                            var cbel = grblBufferSize.shift();
+                            var cbn;
+                            if (typeof(cbel) == 'object')
+                              cbn = gcodeQNs[cbel.qp];
+
                             var errorCode = parseInt(data.split(':')[1]);
-                            writeLog('error: ' + errorCode + ' - ' + grblStrings.errors(errorCode));
-                            io.sockets.emit('data', 'error: ' + errorCode + ' - ' + grblStrings.errors(errorCode));
+                            var msg = 'error: ' + errorCode + ' - ' + grblStrings.errors(errorCode);
+                            writeLog(msg);
+
+                            if (typeof(cbn) != 'undefined' && cbn != -1)
+                              io.emit('data',{ data: msg, qn: cbn, type: 'error', errCode: errorCode, errMsg: grblStrings.errors(errorCode) });
+                            else
+                              io.sockets.emit('data', msg);
+                            //grblBufferSize.shift();
+                            //var errorCode = parseInt(data.split(':')[1]);
+                            //writeLog('error: ' + errorCode + ' - ' + grblStrings.errors(errorCode));
+                            //io.sockets.emit('data', 'error: ' + errorCode + ' - ' + grblStrings.errors(errorCode));
                             break;
                         case 'smoothie':
                             io.sockets.emit('data', data);
@@ -827,7 +857,17 @@ io.sockets.on('connection', function (appSocket) {
                     } else if (data === ' ') {
                         // nothing
                     } else {
-                        io.sockets.emit('data', data);
+                        console.log(grblBufferSize);
+                        var cbel = grblBufferSize.shift();
+                        console.log(['PORTonDATAelse',data,cbel]);
+                        var cbn;
+                        if (typeof(cbel) == 'object')
+                          cbn = gcodeQNs[cbel.qp];
+
+                        if (typeof(cbn) != 'undefined' && cbn != -1)
+                          io.emit('data',{ data: data, qn: cbn, type: 'ok'});
+                        else
+                          io.sockets.emit('data', data);
                     }
                 });
                 break;
@@ -872,7 +912,8 @@ io.sockets.on('connection', function (appSocket) {
                                 io.sockets.emit('data', 'No supported firmware detected. Closing connection to ' + connectedTo);
                                 io.sockets.emit('connectStatus', 'closing:' + connectedTo);
                                 gcodeQueue.length = 0; // dump the queye
-                                grblBufferSize.length = 0; // dump bufferSizes
+                                grblBufferSize = []; // dump bufferSizes
+                                gcodeQNs = [];
                                 tinygBufferSize = TINYG_RX_BUFFER_SIZE; // reset tinygBufferSize
                                 clearInterval(queueCounter);
                                 clearInterval(statusLoop);
@@ -1283,7 +1324,8 @@ io.sockets.on('connection', function (appSocket) {
                                 io.sockets.emit('data', 'No supported firmware detected. Closing connection to ' + connectedTo);
                                 io.sockets.emit('connectStatus', 'closing:' + connectedTo);
                                 gcodeQueue.length = 0; // dump the queye
-                                grblBufferSize.length = 0; // dump bufferSizes
+                                grblBufferSize = []; // dump bufferSizes
+                                gcodeQNs = [];
                                 tinygBufferSize = TINYG_RX_BUFFER_SIZE; // reset tinygBufferSize
                                 reprapBufferSize = REPRAP_RX_BUFFER_SIZE; // reset reprapBufferSize
                                 reprapWaitForPos = false;
@@ -1763,15 +1805,30 @@ io.sockets.on('connection', function (appSocket) {
     });
 
     appSocket.on('runCommand', function (data) {
-        writeLog(chalk.red('Run Command (' + data.replace('\n', '|') + ')'), 1);
+        //if (typeof(data) == 'object')
+        //{
+        //}
         if (isConnected) {
-            if (data) {
-                data = data.split('\n');
-                for (var i = 0; i < data.length; i++) {
-                    var line = data[i].split(';'); // Remove everything after ; = comment
+            var strGcode = null;
+            var qn = -1;
+            if (typeof(data) == 'string')
+              strGcode = data;
+            if (typeof(data) == 'object') {
+              strGcode = data.gcode;
+              qn = data.qn;
+            }
+            writeLog(chalk.red('Run Command (' + strGcode.replace('\n', '|') + ')'), 1);
+            //console.log(['RUN GCODE',strGcode,data]);
+            writeLog(chalk.blue('RUN GCODE: ') + chalk.white(''+strGcode+' ::: '+qn), 1);
+            if (strGcode)
+            {
+                strGcode = strGcode.split('\n');
+                for (var i = 0; i < strGcode.length; i++) {
+                    var line = strGcode[i].split(';'); // Remove everything after ; = comment
                     var tosend = line[0].trim();
                     if (tosend.length > 0) {
-                        addQ(tosend);
+                        var rqn = addQ(tosend);
+                        gcodeQNs[rqn] = qn;
                     }
                 }
                 if (i > 0) {
@@ -2463,7 +2520,8 @@ io.sockets.on('connection', function (appSocket) {
                 }
                 writeLog('Cleaning Queue', 1);
                 gcodeQueue.length = 0; // Dump the Queye
-                grblBufferSize.length = 0; // Dump bufferSizes
+                grblBufferSize = []; // Dump bufferSizes
+                gcodeQNs = [];
                 queueLen = 0;
                 queuePointer = 0;
                 queuePos = 0;
@@ -2495,7 +2553,8 @@ io.sockets.on('connection', function (appSocket) {
             clearInterval(queueCounter);
             io.sockets.emit('qCount', 0);
             gcodeQueue.length = 0; // Dump the Queye
-            grblBufferSize.length = 0; // Dump bufferSizes
+            grblBufferSize = []; // Dump bufferSizes
+            gcodeQNs = [];
             tinygBufferSize = TINYG_RX_BUFFER_SIZE;  // reset tinygBufferSize
             reprapBufferSize = REPRAP_RX_BUFFER_SIZE; // reset reprapBufferSize
             reprapWaitForPos = false;
@@ -2548,7 +2607,8 @@ io.sockets.on('connection', function (appSocket) {
             case 2:
                 writeLog('Emptying Queue', 1);
                 gcodeQueue.length = 0; // Dump the Queye
-                grblBufferSize.length = 0; // Dump bufferSizes
+                grblBufferSize = []; // Dump bufferSizes
+                gcodeQNs = [];
                 tinygBufferSize = TINYG_RX_BUFFER_SIZE;  // reset tinygBufferSize
                 reprapBufferSize = REPRAP_RX_BUFFER_SIZE; // reset reprapBufferSize
                 reprapWaitForPos = false;
@@ -2636,6 +2696,7 @@ io.sockets.on('connection', function (appSocket) {
                 //machineSend(String.fromCharCode(0x18)); // ctrl-x
                 gcodeQueue.length = 0; // dump the queye
                 grblBufferSize.length = 0; // dump bufferSizes
+                gcodeQNs = [];
                 tinygBufferSize = TINYG_RX_BUFFER_SIZE; // reset tinygBufferSize
                 reprapBufferSize = REPRAP_RX_BUFFER_SIZE; // reset reprapBufferSize
                 reprapWaitForPos = false;
@@ -2649,6 +2710,7 @@ io.sockets.on('connection', function (appSocket) {
                 //machineSend(String.fromCharCode(0x18)); // ctrl-x
                 gcodeQueue.length = 0; // dump the queye
                 grblBufferSize.length = 0; // dump bufferSizes
+                gcodeQNs = [];
                 tinygBufferSize = TINYG_RX_BUFFER_SIZE; // reset tinygBufferSize
                 reprapBufferSize = REPRAP_RX_BUFFER_SIZE; // reset reprapBufferSize
                 reprapWaitForPos = false;
@@ -2662,6 +2724,7 @@ io.sockets.on('connection', function (appSocket) {
                 //machineSend(String.fromCharCode(0x18)); // ctrl-x
                 gcodeQueue.length = 0; // dump the queye
                 grblBufferSize.length = 0; // dump bufferSizes
+                gcodeQNs = [];
                 tinygBufferSize = TINYG_RX_BUFFER_SIZE; // reset tinygBufferSize
                 reprapBufferSize = REPRAP_RX_BUFFER_SIZE; // reset reprapBufferSize
                 reprapWaitForPos = false;
@@ -2690,6 +2753,7 @@ io.sockets.on('connection', function (appSocket) {
 function addQ(gcode) {
     gcodeQueue.push(gcode);
     queueLen = gcodeQueue.length;
+    return queueLen;
 }
 
 //function jumpQ(gcode) {
@@ -2698,9 +2762,8 @@ function addQ(gcode) {
 
 function grblBufferSpace() {
     var total = 0;
-    var len = grblBufferSize.length;
-    for (var i = 0; i < len; i++) {
-        total += grblBufferSize[i];
+    for (var i = 0; i < grblBufferSize.length; i++) {
+        total += grblBufferSize[i].len;
     }
     return GRBL_RX_BUFFER_SIZE - total;
 }
@@ -2737,7 +2800,7 @@ function send1Q() {
                             // Add gcode to send buffer
                             gcode = gcodeQueue[queuePointer];
                             queuePointer++;
-                            grblBufferSize.push(gcodeLen + 1);
+                            grblBufferSize.push({len: gcodeLen + 1, qp: queuePointer });
                             gcodeLine += gcode + '\n';
                             spaceLeft = GRBL_RX_BUFFER_SIZE - gcodeLine.length;
                         } else {
@@ -2758,8 +2821,9 @@ function send1Q() {
                     gcodeLen = gcodeQueue[queuePointer].length;
                     if (gcodeLen < spaceLeft) {
                         gcode = gcodeQueue[queuePointer];
+                        ///WOWOWO
+                        grblBufferSize.push({len: gcodeLen + 1, qp: queuePointer });
                         queuePointer++;
-                        grblBufferSize.push(gcodeLen + 1);
                         machineSend(gcode + '\n');
                         writeLog('Sent: ' + gcode + ' Q: ' + (queueLen - queuePointer) + ' Bspace: ' + (spaceLeft - gcodeLen - 1), 2);
                     } else {
@@ -2840,7 +2904,8 @@ function send1Q() {
                 writeLog('Ave. Speed: ' + speed + ' lines/s', 1);
             }
             gcodeQueue.length = 0; // Dump the Queye
-            grblBufferSize.length = 0; // Dump bufferSizes
+            grblBufferSize = []; // Dump bufferSizes
+            gcodeQNs = [];
             tinygBufferSize = TINYG_RX_BUFFER_SIZE;  // reset tinygBufferSize
             reprapBufferSize = REPRAP_RX_BUFFER_SIZE;  // reset tinygBufferSize
             queueLen = 0;
